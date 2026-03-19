@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Aether Set Explorer</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0a0a0f; color: #ccc; font-family: 'Courier New', monospace;
+       display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+#top { display: flex; align-items: stretch; flex: 1; min-height: 0; }
+#canvas-wrap { position: relative; flex: 1; }
+canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+#overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+                  pointer-events: none; }
+#sidebar { width: 280px; background: #111118; padding: 14px 12px;
+           display: flex; flex-direction: column; gap: 10px;
+           overflow-y: auto; border-left: 1px solid #222; }
+.section-title { color: #7af; font-size: 11px; letter-spacing: 2px;
+                 text-transform: uppercase; margin-bottom: 4px;
+                 border-bottom: 1px solid #223; padding-bottom: 4px; }
+.row { display: flex; align-items: center; gap: 8px; }
+.row label { font-size: 11px; color: #aaa; flex: 0 0 110px; }
+.row span { font-size: 11px; color: #7f9; min-width: 40px; text-align: right; }
+input[type=range] { flex: 1; accent-color: #4af; height: 4px; }
+input[type=checkbox] { accent-color: #4af; }
+#info { font-size: 10px; color: #666; line-height: 1.6; }
+#coords { font-size: 10px; color: #48f; line-height: 1.5; }
+#orbit-panel { font-size: 10px; color: #fa8; line-height: 1.5; }
+.btn { background: #1a1a2e; border: 1px solid #336; color: #8af;
+       font-family: inherit; font-size: 11px; padding: 5px 10px;
+       cursor: pointer; border-radius: 3px; flex: 1; }
+.btn:hover { background: #222240; border-color: #55a; }
+#bottombar { background: #0d0d15; border-top: 1px solid #1a1a2e;
+             padding: 5px 12px; font-size: 10px; color: #555;
+             display: flex; justify-content: space-between; }
+#phase-badge { font-size: 10px; padding: 2px 7px; border-radius: 3px;
+               font-weight: bold; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+
+<div id="top">
+<div id="canvas-wrap">
+  <canvas id="glc"></canvas>
+  <canvas id="overlay-canvas" id="ovr"></canvas>
+</div>
+
+<div id="sidebar">
+  <div style="color:#7af;font-size:14px;font-weight:bold;letter-spacing:1px;">
+    ⬡ AETHER SET EXPLORER
+  </div>
+  <div style="font-size:10px;color:#456;">
+    z<sub>n+1</sub> = K·z<sub>n</sub>·e<sup>Im(z)</sup> + c
+  </div>
+
+  <div>
+    <div class="section-title">Parameters</div>
+    <div class="row">
+      <label>K (ensemble)</label>
+      <input type="range" id="sK" min="1" max="80" step="0.1" value="31">
+      <span id="vK">31.0</span>
+    </div>
+    <div class="row">
+      <label>Max iter</label>
+      <input type="range" id="sIter" min="32" max="1024" step="8" value="256">
+      <span id="vIter">256</span>
+    </div>
+    <div class="row">
+      <label>Escape R</label>
+      <input type="range" id="sR" min="2" max="50" step="0.5" value="10">
+      <span id="vR">10.0</span>
+    </div>
+  </div>
+
+  <div>
+    <div class="section-title">Display</div>
+    <div class="row">
+      <label>Color cycle</label>
+      <input type="range" id="sCycle" min="0.5" max="20" step="0.5" value="6">
+      <span id="vCycle">6.0</span>
+    </div>
+    <div class="row">
+      <label>Color scheme</label>
+      <input type="range" id="sScheme" min="0" max="3" step="1" value="0">
+      <span id="vScheme">Aether</span>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="chkBoundary" checked> Theorem boundary</label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="chkExample"> Example operating point</label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="chkOrbit"> Click → orbit trace</label>
+    </div>
+  </div>
+
+  <div>
+    <div class="section-title">Navigation</div>
+    <div style="font-size:10px;color:#567;line-height:1.7;">
+      Scroll · zoom<br>
+      Drag · pan<br>
+      Click · orbit trace (if on)<br>
+      Dbl-click · zoom to point
+    </div>
+    <div style="display:flex;gap:6px;margin-top:6px;">
+      <button class="btn" onclick="resetView()">Reset view</button>
+      <button class="btn" onclick="snapPreset('k31')">K=31 filament</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <button class="btn" onclick="snapPreset('transition')">K* transition</button>
+      <button class="btn" onclick="snapPreset('dome')">K=7 dome</button>
+    </div>
+  </div>
+
+  <div>
+    <div class="section-title">Cursor</div>
+    <div id="coords">—</div>
+  </div>
+
+  <div>
+    <div class="section-title">Orbit info</div>
+    <div id="orbit-panel">Click to trace an orbit</div>
+  </div>
+
+  <div>
+    <div class="section-title">Theory</div>
+    <div id="info">
+      <b style="color:#7af">Theorem 3.2 (Theorem 3.2 (§3a))</b><br>
+      BSS_max(δ̄,K) =<br>
+      √(R²/(Ke^δ̄+1)² − δ̄²)<br><br>
+      <b style="color:#7af">Prop 3.3 (Prop 3.3 (§3a))</b><br>
+      ρ = 1 at dome apex<br>
+      (K=3..63 verified)<br><br>
+      <b style="color:#fa8">Phase transition</b><br>
+      K* ≈ 25 (N* ≈ 4.6)<br>
+      λ = 0.277 per K unit
+    </div>
+  </div>
+
+  <div id="phase-badge" style="background:#1a2a1a;color:#4f8;border:1px solid #2a4a2a;">
+    POWER-LAW REGIME
+  </div>
+</div>
+</div>
+
+<div id="bottombar">
+  <span id="zoom-disp">zoom: 1.0×</span>
+  <span id="center-disp">center: (0.0000, 0.0000)</span>
+  <span id="fps-disp">— fps</span>
+  <span style="color:#334;">Aether Set Explorer · Prop 3.3 (§3a) · 15 Mar 2026</span>
+</div>
+
+<script>
+// ─── WebGL setup ────────────────────────────────────────────
+const canvas = document.getElementById('glc');
+const ovr    = document.getElementById('overlay-canvas');
+const octx   = ovr.getContext('2d');
+const gl     = canvas.getContext('webgl', {antialias:false, preserveDrawingBuffer:true});
+if (!gl) { alert('WebGL not available'); }
+
+const VS = `
+attribute vec2 a_pos;
+void main() { gl_Position = vec4(a_pos, 0, 1); }
+`;
+
+const FS = `
+precision highp float;
+uniform vec2  u_res;
+uniform vec2  u_center;
+uniform float u_scale;
+uniform float u_K;
+uniform float u_R;
+uniform int   u_maxiter;
+uniform float u_cycle;
+uniform int   u_scheme;
+
+vec3 palette(float t, int scheme) {
+    t = fract(t);
+    if (scheme == 0) { // Aether — deep blue/teal/gold
+        vec3 a = vec3(0.05, 0.08, 0.20);
+        vec3 b = vec3(0.50, 0.50, 0.35);
+        vec3 c = vec3(1.00, 1.00, 0.80);
+        vec3 d = vec3(0.00, 0.33, 0.67);
+        return a + b*cos(6.2832*(c*t+d));
+    } else if (scheme == 1) { // Fire
+        vec3 a = vec3(0.1, 0.02, 0.0);
+        vec3 b = vec3(0.5, 0.4, 0.1);
+        vec3 c = vec3(1.0, 0.8, 0.5);
+        vec3 d = vec3(0.0, 0.15, 0.3);
+        return a + b*cos(6.2832*(c*t+d));
+    } else if (scheme == 2) { // Ice
+        vec3 a = vec3(0.0, 0.05, 0.15);
+        vec3 b = vec3(0.3, 0.4, 0.5);
+        vec3 c = vec3(0.8, 0.9, 1.0);
+        vec3 d = vec3(0.5, 0.6, 0.7);
+        return a + b*cos(6.2832*(c*t+d));
+    } else { // Gold
+        vec3 a = vec3(0.08, 0.06, 0.0);
+        vec3 b = vec3(0.5, 0.45, 0.1);
+        vec3 c = vec3(1.0, 0.9, 0.6);
+        vec3 d = vec3(0.0, 0.1, 0.2);
+        return a + b*cos(6.2832*(c*t+d));
+    }
+}
+
+void main() {
+    vec2 uv = (gl_FragCoord.xy - u_res * 0.5) / (u_res.y * 0.5) * u_scale + u_center;
+    vec2 c = uv;
+    vec2 z = vec2(0.0);
+    float R2 = u_R * u_R;
+    int escaped_at = u_maxiter;
+    float smooth_i = 0.0;
+    for (int i = 0; i < 1024; i++) {
+        if (i >= u_maxiter) break;
+        float ey  = exp(z.y);
+        float key = u_K * ey;
+        z = vec2(key * z.x + c.x, key * z.y + c.y);
+        float r2 = dot(z, z);
+        if (r2 > R2) {
+            escaped_at = i;
+            // smooth colouring (avoids banding)
+            smooth_i = float(i) + 1.0 - log(log(sqrt(r2)) / log(u_R)) / log(2.0);
+            break;
+        }
+    }
+    if (escaped_at == u_maxiter) {
+        // stable — interior black with faint glow
+        float glow = length(z) / u_R;
+        gl_FragColor = vec4(vec3(0.02, 0.03, 0.06) * (1.0 + glow * 0.3), 1.0);
+    } else {
+        float t = smooth_i / u_cycle;
+        vec3 col = palette(t, u_scheme);
+        // darken near boundary
+        float edge = float(escaped_at) / float(u_maxiter);
+        col *= 0.6 + 0.4 * edge;
+        gl_FragColor = vec4(col, 1.0);
+    }
+}
+`;
+
+function compileShader(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+        console.error(gl.getShaderInfoLog(s));
+    return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER,
+    new Float32Array([-1,-1, 1,-1, -1,1, 1,-1, 1,1, -1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'a_pos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const uRes    = gl.getUniformLocation(prog, 'u_res');
+const uCenter = gl.getUniformLocation(prog, 'u_center');
+const uScale  = gl.getUniformLocation(prog, 'u_scale');
+const uK      = gl.getUniformLocation(prog, 'u_K');
+const uR      = gl.getUniformLocation(prog, 'u_R');
+const uMaxiter= gl.getUniformLocation(prog, 'u_maxiter');
+const uCycle  = gl.getUniformLocation(prog, 'u_cycle');
+const uScheme = gl.getUniformLocation(prog, 'u_scheme');
+
+// ─── State ───────────────────────────────────────────────────
+let cx = 0.0, cy = -0.05, scale = 1.2;
+let K = 31, maxiter = 256, Resc = 10, cycle = 6, scheme = 0;
+let showBoundary = true, showExample = false, showOrbit = false;
+let orbitPoint = null;
+let dirty = true;
+let lastT = 0, fps = 0;
+
+const SCHEME_NAMES = ['Aether','Fire','Ice','Gold'];
+
+// ─── Resize ─────────────────────────────────────────────────
+function resize() {
+    const wrap = canvas.parentElement;
+    canvas.width  = wrap.clientWidth;
+    canvas.height = wrap.clientHeight;
+    ovr.width     = wrap.clientWidth;
+    ovr.height    = wrap.clientHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    dirty = true;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ─── Coordinate helpers ──────────────────────────────────────
+function screenToComplex(px, py) {
+    const W = canvas.width, H = canvas.height;
+    return [
+        (px - W/2) / (H/2) * scale + cx,
+        -(py - H/2) / (H/2) * scale + cy
+    ];
+}
+
+// ─── Render ──────────────────────────────────────────────────
+function render(t) {
+    if (dirty) {
+        gl.uniform2f(uRes, canvas.width, canvas.height);
+        gl.uniform2f(uCenter, cx, cy);
+        gl.uniform1f(uScale, scale);
+        gl.uniform1f(uK, K);
+        gl.uniform1f(uR, Resc);
+        gl.uniform1i(uMaxiter, maxiter);
+        gl.uniform1f(uCycle, cycle);
+        gl.uniform1i(uScheme, scheme);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        drawOverlay();
+        dirty = false;
+    }
+    const dt = t - lastT; lastT = t;
+    if (dt > 0) fps = Math.round(0.9 * fps + 0.1 * (1000/dt));
+    document.getElementById('fps-disp').textContent = fps + ' fps';
+    requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+// ─── Overlay (analytical boundary + Example point) ──────────────
+function drawOverlay() {
+    const W = ovr.width, H = ovr.height;
+    octx.clearRect(0, 0, W, H);
+
+    if (showBoundary) {
+        // Draw Theorem 3.2 boundary curve
+        octx.beginPath();
+        octx.strokeStyle = 'rgba(255, 210, 60, 0.85)';
+        octx.lineWidth = 1.8;
+        let started = false;
+        const steps = 600;
+        for (let i = 0; i <= steps; i++) {
+            // Sweep δ̄ from -10 to 0.5
+            const dbar = -10 + 10.5 * i / steps;
+            const denom = K * Math.exp(dbar) + 1;
+            const inner2 = (Resc * Resc) / (denom * denom) - dbar * dbar;
+            if (inner2 <= 0) { started = false; continue; }
+            const bss = Math.sqrt(inner2);
+            // Right side
+            const [sx, sy] = complexToScreen(bss, dbar);
+            if (!started) { octx.moveTo(sx, sy); started = true; }
+            else octx.lineTo(sx, sy);
+        }
+        octx.stroke();
+        // Left side (mirror)
+        octx.beginPath();
+        started = false;
+        for (let i = 0; i <= steps; i++) {
+            const dbar = -10 + 10.5 * i / steps;
+            const denom = K * Math.exp(dbar) + 1;
+            const inner2 = (Resc * Resc) / (denom * denom) - dbar * dbar;
+            if (inner2 <= 0) { started = false; continue; }
+            const bss = -Math.sqrt(inner2);
+            const [sx, sy] = complexToScreen(bss, dbar);
+            if (!started) { octx.moveTo(sx, sy); started = true; }
+            else octx.lineTo(sx, sy);
+        }
+        octx.stroke();
+        // Label
+        octx.fillStyle = 'rgba(255,210,60,0.7)';
+        octx.font = '10px Courier New';
+        octx.fillText('Thm 3.2', 6, H - 8);
+    }
+
+    if (showExample && K === 31) {
+        // Example operating point: BSS=0.3694, δ̄=0.0498
+        const [ox, oy] = complexToScreen(0.3694, 0.0498);
+        octx.beginPath();
+        octx.arc(ox, oy, 6, 0, Math.PI * 2);
+        octx.strokeStyle = 'rgba(80,255,180,0.9)';
+        octx.lineWidth = 2;
+        octx.stroke();
+        octx.fillStyle = 'rgba(80,255,180,0.9)';
+        octx.font = '10px Courier New';
+        octx.fillText('Example (BSS=0.37)', ox + 10, oy - 4);
+        // Also mark the wall
+        const dbar_ref = -0.0498;
+        const denom = K * Math.exp(dbar_ref) + 1;
+        const inner2 = (Resc * Resc) / (denom * denom) - dbar_ref * dbar_ref;
+        if (inner2 > 0) {
+            const wall = Math.sqrt(inner2) * 1.278;
+            const [wx, wy] = complexToScreen(wall, 0.0498);
+            octx.beginPath();
+            octx.moveTo(wx, wy - 8); octx.lineTo(wx, wy + 8);
+            octx.strokeStyle = 'rgba(80,255,180,0.5)';
+            octx.lineWidth = 1;
+            octx.stroke();
+            octx.fillStyle = 'rgba(80,255,180,0.5)';
+            octx.fillText('wall', wx + 4, wy + 4);
+        }
+    }
+
+    if (showOrbit && orbitPoint) {
+        drawOrbit(orbitPoint[0], orbitPoint[1]);
+    }
+}
+
+function complexToScreen(re, im) {
+    const W = canvas.width, H = canvas.height;
+    const sx = (re - cx) / scale * (H/2) + W/2;
+    const sy = -(im - cy) / scale * (H/2) + H/2;
+    return [sx, sy];
+}
+
+function drawOrbit(re, im) {
+    const MAX = 80;
+    const pts = [[re, im]];
+    let zx = 0, zy = 0;
+    let escaped = false;
+    for (let i = 0; i < MAX; i++) {
+        const ey  = Math.exp(zy);
+        const key = K * ey;
+        const nzx = key * zx + re;
+        const nzy = key * zy + im;
+        zx = nzx; zy = nzy;
+        pts.push([zx, zy]);
+        if (zx*zx + zy*zy > Resc*Resc) { escaped = true; break; }
+    }
+
+    octx.beginPath();
+    const [sx0, sy0] = complexToScreen(re, im);
+    octx.moveTo(sx0, sy0);
+    for (let i = 1; i < pts.length; i++) {
+        const [sx, sy] = complexToScreen(pts[i][0], pts[i][1]);
+        octx.lineTo(sx, sy);
+    }
+    octx.strokeStyle = escaped ? 'rgba(255,100,80,0.7)' : 'rgba(80,220,180,0.7)';
+    octx.lineWidth = 1.2;
+    octx.stroke();
+
+    // Draw dots
+    for (let i = 0; i < pts.length; i++) {
+        const [sx, sy] = complexToScreen(pts[i][0], pts[i][1]);
+        octx.beginPath();
+        octx.arc(sx, sy, i === 0 ? 4 : 2.5, 0, Math.PI*2);
+        octx.fillStyle = i === 0 ? '#fff' : (escaped ? 'rgba(255,100,80,0.8)' : 'rgba(80,220,180,0.8)');
+        octx.fill();
+    }
+
+    const iter_count = pts.length - 1;
+    const status = escaped ? `escaped (iter ${iter_count})` : `bounded (${iter_count} iters shown)`;
+    document.getElementById('orbit-panel').innerHTML =
+        `c = (${re.toFixed(4)}, ${im.toFixed(4)})<br>` +
+        `Status: <b style="color:${escaped?'#f86':'#4ec'}">${status}</b><br>` +
+        `|z_1| = ${Math.hypot(re, im).toFixed(4)}<br>` +
+        `K·e^δ̄+1 = ${(K * Math.exp(im) + 1).toFixed(3)}`;
+}
+
+// ─── Sliders ────────────────────────────────────────────────
+function bind(id, vid, key, fmt, cb) {
+    const el = document.getElementById(id);
+    el.addEventListener('input', () => {
+        const v = parseFloat(el.value);
+        window[key] = v;
+        const disp = fmt ? fmt(v) : v.toString();
+        document.getElementById(vid).textContent = disp;
+        if (cb) cb(v);
+        dirty = true;
+        updatePhaseLabel();
+    });
+}
+bind('sK',      'vK',      'K',      v => v.toFixed(1));
+bind('sIter',   'vIter',   'maxiter',v => Math.round(v).toString());
+bind('sR',      'vR',      'Resc',   v => v.toFixed(1));
+bind('sCycle',  'vCycle',  'cycle',  v => v.toFixed(1));
+bind('sScheme', 'vScheme', 'scheme', v => SCHEME_NAMES[Math.round(v)], v => { scheme = Math.round(v); });
+
+document.getElementById('chkBoundary').addEventListener('change', e => { showBoundary = e.target.checked; dirty = true; });
+document.getElementById('chkExample').addEventListener('change', e => { showExample = e.target.checked; dirty = true; });
+document.getElementById('chkOrbit').addEventListener('change', e => { showOrbit = e.target.checked; dirty = true; });
+
+function updatePhaseLabel() {
+    const el = document.getElementById('phase-badge');
+    if (K < 25) {
+        el.style.background = '#1a2a1a'; el.style.color = '#4f8';
+        el.style.borderColor = '#2a4a2a';
+        el.textContent = 'POWER-LAW REGIME';
+    } else if (K < 43) {
+        el.style.background = '#2a1a0a'; el.style.color = '#fa6';
+        el.style.borderColor = '#4a2a0a';
+        el.textContent = 'COLLAPSE REGIME';
+    } else {
+        el.style.background = '#2a0a0a'; el.style.color = '#f44';
+        el.style.borderColor = '#4a0a0a';
+        el.textContent = 'BELOW DETECTION';
+    }
+}
+
+// ─── Mouse interaction ───────────────────────────────────────
+let dragging = false, lastMX = 0, lastMY = 0;
+
+canvas.addEventListener('mousedown', e => {
+    dragging = true; lastMX = e.clientX; lastMY = e.clientY;
+});
+canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const py = (e.clientY - rect.top)  * (canvas.height / rect.height);
+    const [re, im] = screenToComplex(px, py);
+    document.getElementById('coords').textContent =
+        `BSS = ${re.toFixed(5)}\nδ̄   = ${im.toFixed(5)}`;
+    document.getElementById('center-disp').textContent =
+        `cursor: (${re.toFixed(4)}, ${im.toFixed(4)})`;
+
+    if (dragging) {
+        const dx = e.clientX - lastMX;
+        const dy = e.clientY - lastMY;
+        cx -= dx / (canvas.height / 2) * scale;
+        cy += dy / (canvas.height / 2) * scale;
+        lastMX = e.clientX; lastMY = e.clientY;
+        dirty = true;
+        document.getElementById('center-disp').textContent =
+            `center: (${cx.toFixed(4)}, ${cy.toFixed(4)})`;
+    }
+});
+canvas.addEventListener('mouseup', () => { dragging = false; });
+canvas.addEventListener('mouseleave', () => { dragging = false; });
+
+canvas.addEventListener('click', e => {
+    if (!showOrbit) return;
+    const rect = canvas.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const py = (e.clientY - rect.top)  * (canvas.height / rect.height);
+    orbitPoint = screenToComplex(px, py);
+    dirty = true;
+});
+
+canvas.addEventListener('dblclick', e => {
+    const rect = canvas.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const py = (e.clientY - rect.top)  * (canvas.height / rect.height);
+    const [re, im] = screenToComplex(px, py);
+    cx = re; cy = im;
+    scale *= 0.35;
+    dirty = true;
+    document.getElementById('center-disp').textContent =
+        `center: (${cx.toFixed(4)}, ${cy.toFixed(4)})`;
+});
+
+canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 1.15 : 0.87;
+    scale *= factor;
+    dirty = true;
+    document.getElementById('zoom-disp').textContent =
+        'zoom: ' + (1.2 / scale).toFixed(1) + '×';
+}, {passive: false});
+
+// Touch support
+let lastTouchDist = null;
+canvas.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+        dragging = true;
+        lastMX = e.touches[0].clientX; lastMY = e.touches[0].clientY;
+    }
+    if (e.touches.length === 2) {
+        lastTouchDist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY);
+    }
+    e.preventDefault();
+}, {passive:false});
+canvas.addEventListener('touchmove', e => {
+    if (e.touches.length === 1 && dragging) {
+        const dx = e.touches[0].clientX - lastMX;
+        const dy = e.touches[0].clientY - lastMY;
+        cx -= dx / (canvas.height / 2) * scale;
+        cy += dy / (canvas.height / 2) * scale;
+        lastMX = e.touches[0].clientX; lastMY = e.touches[0].clientY;
+        dirty = true;
+    }
+    if (e.touches.length === 2 && lastTouchDist !== null) {
+        const d = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY);
+        scale *= lastTouchDist / d;
+        lastTouchDist = d;
+        dirty = true;
+    }
+    e.preventDefault();
+}, {passive:false});
+canvas.addEventListener('touchend', () => { dragging = false; lastTouchDist = null; });
+
+// ─── Presets ─────────────────────────────────────────────────
+function resetView() {
+    cx = 0; cy = -0.05; scale = 1.2;
+    document.getElementById('zoom-disp').textContent = 'zoom: 1.0×';
+    dirty = true;
+}
+
+function snapPreset(name) {
+    if (name === 'k31') {
+        document.getElementById('sK').value = 31; K = 31;
+        document.getElementById('vK').textContent = '31.0';
+        cx = 0; cy = -0.05; scale = 0.06;
+    } else if (name === 'transition') {
+        document.getElementById('sK').value = 25; K = 25;
+        document.getElementById('vK').textContent = '25.0';
+        cx = 0; cy = -0.5; scale = 0.8;
+    } else if (name === 'dome') {
+        document.getElementById('sK').value = 7; K = 7;
+        document.getElementById('vK').textContent = '7.0';
+        cx = 0; cy = -2.2; scale = 3.0;
+    }
+    updatePhaseLabel();
+    dirty = true;
+}
+
+updatePhaseLabel();
+</script>
+</body>
+</html>
